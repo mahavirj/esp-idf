@@ -12,6 +12,10 @@
 #include "esp_system.h"
 #include "esp_spi_flash.h"
 
+void dummy_func()
+{
+    printf("dummy print\n");
+}
 
 void app_main(void)
 {
