@@ -35,6 +35,7 @@ size_t multi_heap_free_size_impl(multi_heap_handle_t heap);
 size_t multi_heap_minimum_free_size_impl(multi_heap_handle_t heap);
 size_t multi_heap_get_allocated_size_impl(multi_heap_handle_t heap, void *p);
 void *multi_heap_get_block_address_impl(multi_heap_block_handle_t block);
+size_t multi_heap_get_free_size(multi_heap_block_handle_t block);
 
 /* Some internal functions for heap poisoning use */
 
@@ -69,3 +70,4 @@ void *multi_heap_get_block_address(multi_heap_block_handle_t block);
 
 /* Get the owner identification for a heap block */
 void *multi_heap_get_block_owner(multi_heap_block_handle_t block);
+void *multi_heap_get_block_owner_from_ptr(multi_heap_handle_t heap, void *ptr);

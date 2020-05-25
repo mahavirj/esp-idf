@@ -22,6 +22,10 @@
 #include "esp_log.h"
 #include "heap_private.h"
 #include "esp_system.h"
+#ifdef CONFIG_HEAP_TASK_TRACKING
+#include "esp_heap_task_info.h"
+#include "multi_heap_internal.h"
+#endif
 
 /*
 This file, combined with a region allocator that supports multiple heaps, solves the problem that the ESP32 has RAM
@@ -138,12 +142,18 @@ IRAM_ATTR void *heap_caps_malloc( size_t size, uint32_t caps )
                         ret = multi_heap_malloc(heap->heap, size + 4);  // int overflow checked above
 
                         if (ret != NULL) {
+#ifdef CONFIG_HEAP_TASK_TRACKING
+                            heap_caps_update_per_task_info_alloc(heap->heap, multi_heap_get_allocated_size(heap->heap, ret), get_all_caps(heap));
+#endif
                             return dram_alloc_to_iram_addr(ret, size + 4);  // int overflow checked above
                         }
                     } else {
                         //Just try to alloc, nothing special.
                         ret = multi_heap_malloc(heap->heap, size);
                         if (ret != NULL) {
+#ifdef CONFIG_HEAP_TASK_TRACKING
+                            heap_caps_update_per_task_info_alloc(heap->heap, multi_heap_get_allocated_size(heap->heap, ret), get_all_caps(heap));
+#endif
                             return ret;
                         }
                     }
@@ -302,6 +312,9 @@ IRAM_ATTR void heap_caps_free( void *ptr)
 
     heap_t *heap = find_containing_heap(ptr);
     assert(heap != NULL && "free() target pointer is outside heap areas");
+#ifdef CONFIG_HEAP_TASK_TRACKING
+    heap_caps_update_per_task_info_free(heap->heap, ptr, get_all_caps(heap));
+#endif
     multi_heap_free(heap->heap, ptr);
 }
 
@@ -352,8 +365,15 @@ IRAM_ATTR void *heap_caps_realloc( void *ptr, size_t size, int caps)
     if (compatible_caps && !ptr_in_diram_case) {
         // try to reallocate this memory within the same heap
         // (which will resize the block if it can)
+#ifdef CONFIG_HEAP_TASK_TRACKING
+        size_t old_size = multi_heap_get_allocated_size(heap->heap, ptr);
+        TaskHandle_t old_task = (TaskHandle_t)multi_heap_get_block_owner_from_ptr(heap->heap, ptr);
+#endif
         void *r = multi_heap_realloc(heap->heap, ptr, size);
         if (r != NULL) {
+#ifdef CONFIG_HEAP_TASK_TRACKING
+            heap_caps_update_per_task_info_realloc(heap->heap, old_size, old_task, multi_heap_get_allocated_size(heap->heap, r), get_all_caps(heap));
+#endif
             return r;
         }
     }

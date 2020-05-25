@@ -333,6 +333,11 @@ size_t multi_heap_get_allocated_size_impl(multi_heap_handle_t heap, void *p)
     return block_data_size(pb);
 }
 
+size_t multi_heap_get_free_size(multi_heap_block_handle_t block)
+{
+    return block_data_size((heap_block_t *)block);
+}
+
 multi_heap_handle_t multi_heap_register_impl(void *start_ptr, size_t size)
 {
     uintptr_t start = ALIGN_UP((uintptr_t)start_ptr);

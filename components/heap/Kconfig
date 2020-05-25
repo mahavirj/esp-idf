@@ -63,6 +63,29 @@ menu "Heap memory debugging"
             This function depends on heap poisoning being enabled and adds four more bytes of overhead for each block
             allocated.
 
+    config HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+        bool "Include free blocks' info too"
+        default y
+        depends on HEAP_TASK_TRACKING
+        help
+            Free blocks are included too when block information is fetched via heap_caps_get_per_task_info() API.
+
+    config HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+        bool "Include taskname too"
+        default y
+        depends on HEAP_TASK_TRACKING
+        help
+            Adds to the size of the structure, but useful to get name of deleted tasks' allocations.
+
+    config HEAP_MAX_TASK_NAME_LEN
+        int "Task name length"
+        range 5 15
+        default 10
+        depends on HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+        help
+            Max length of taskname to be stored. Max length of the task name would be the (value-1).
+
+
     config HEAP_ABORT_WHEN_ALLOCATION_FAILS
         bool "Abort if memory allocation fails"
         default n

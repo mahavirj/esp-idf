@@ -353,6 +353,16 @@ void *multi_heap_get_block_owner(multi_heap_block_handle_t block)
     return MULTI_HEAP_GET_BLOCK_OWNER((poison_head_t*)multi_heap_get_block_address_impl(block));
 }
 
+void *multi_heap_get_block_owner_from_ptr(multi_heap_handle_t heap, void *p)
+{
+    multi_heap_internal_lock(heap);
+    poison_head_t *head = verify_allocated_region(p, true);
+    assert(head != NULL);
+    void *owner = MULTI_HEAP_GET_BLOCK_OWNER(head);
+    multi_heap_internal_unlock(heap);
+    return owner;
+}
+
 multi_heap_handle_t multi_heap_register(void *start, size_t size)
 {
 #ifdef SLOW

@@ -15,11 +15,141 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <multi_heap.h>
+#include <string.h>
 #include "multi_heap_internal.h"
 #include "heap_private.h"
 #include "esp_heap_task_info.h"
 
 #ifdef CONFIG_HEAP_TASK_TRACKING
+static SLIST_HEAD(heap_task_stat_ll, heap_task_stat) task_stats;
+
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+/* Function is useful when active allocations' task is deleted */
+static const char *heap_caps_get_task_name(TaskHandle_t task)
+{
+    heap_task_stat_t *task_info = NULL;
+    SLIST_FOREACH(task_info, &task_stats, next) {
+        if (task_info->task == task) {
+            return task_info->taskname;
+        }
+    }
+    return "NotFound";
+}
+#endif
+
+IRAM_ATTR void heap_caps_update_per_task_info_alloc(multi_heap_handle_t heap, size_t size, int caps)
+{
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+
+    int type = ((caps & MALLOC_CAP_8BIT) == MALLOC_CAP_8BIT) ? 0 : 1;
+
+    heap_task_stat_t *task_info = NULL;
+    SLIST_FOREACH(task_info, &task_stats, next) {
+        if (task_info->task == task) {
+            task_info->current[type] += size;
+            if (task_info->current[type] > task_info->peak[type]) {
+                task_info->peak[type] = task_info->current[type];
+            }
+            if (!task_info->min_block) {
+                task_info->min_block = size;
+            }
+            if (task_info->min_block > size) {
+                task_info->min_block = size;
+            }
+            if (task_info->max_block < size) {
+                task_info->max_block = size;
+            }
+            return;
+        }
+    }
+
+    task_info = multi_heap_malloc(heap, sizeof(heap_task_stat_t));
+    if (!task_info) {
+        return;
+    }
+    memset(task_info, 0, sizeof(heap_task_stat_t));
+    task_info->task = task;
+    task_info->current[type] = size;
+    task_info->peak[type] = size;
+    task_info->min_block = size;
+    task_info->max_block = size;
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+    if (!task) {
+        strlcpy(task_info->taskname, "Pre-schedular", CONFIG_HEAP_MAX_TASK_NAME_LEN);
+    } else {
+        strlcpy(task_info->taskname, pcTaskGetTaskName(task), CONFIG_HEAP_MAX_TASK_NAME_LEN);
+    }
+#endif
+    SLIST_INSERT_HEAD(&task_stats, task_info, next);
+}
+
+IRAM_ATTR void heap_caps_update_per_task_info_free(multi_heap_handle_t heap, void *ptr, int caps)
+{
+    TaskHandle_t task = (TaskHandle_t)multi_heap_get_block_owner_from_ptr(heap, ptr);
+    if (!task) {
+        return;
+    }
+    int type = ((caps & MALLOC_CAP_8BIT) == MALLOC_CAP_8BIT) ? 0 : 1;
+    heap_task_stat_t *task_info = NULL;
+    SLIST_FOREACH(task_info, &task_stats, next) {
+        if (task_info->task == task) {
+            task_info->current[type] -= multi_heap_get_allocated_size(heap, ptr);
+        }
+    }
+}
+
+IRAM_ATTR void heap_caps_update_per_task_info_realloc(multi_heap_handle_t heap, size_t old_size, TaskHandle_t old_task, size_t new_size, int caps)
+{
+    TaskHandle_t task = xTaskGetCurrentTaskHandle();
+    bool task_in_list = false;
+
+    int type = ((caps & MALLOC_CAP_8BIT) == MALLOC_CAP_8BIT) ? 0 : 1;
+
+    heap_task_stat_t *task_info = NULL;
+    SLIST_FOREACH(task_info, &task_stats, next) {
+        if (task_info->task == task) {
+            task_info->current[type] += new_size;
+            if (task_info->current[type] > task_info->peak[type]) {
+                task_info->peak[type] = task_info->current[type];
+            }
+            if (!task_info->min_block) {
+                task_info->min_block = new_size;
+            }
+            if (task_info->min_block > new_size) {
+                task_info->min_block = new_size;
+            }
+            if (task_info->max_block < new_size) {
+                task_info->max_block = new_size;
+            }
+            task_in_list = true;
+        }
+        if (task_info->task == old_task) {
+            task_info->current[type] -= old_size;
+        }
+    }
+
+    if (task_in_list)
+        return;
+
+    task_info = multi_heap_malloc(heap, sizeof(heap_task_stat_t));
+    if (!task_info) {
+        return;
+    }
+    memset(task_info, 0, sizeof(heap_task_stat_t));
+    task_info->task = task;
+    task_info->current[type] =  new_size;
+    task_info->peak[type] = new_size;
+    task_info->min_block = new_size;
+    task_info->max_block = new_size;
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+    if (!task) {
+        strlcpy(task_info->taskname, "Pre-schedular", CONFIG_HEAP_MAX_TASK_NAME_LEN);
+    } else {
+        strlcpy(task_info->taskname, pcTaskGetTaskName(task), CONFIG_HEAP_MAX_TASK_NAME_LEN);
+    }
+#endif
+    SLIST_INSERT_HEAD(&task_stats, task_info, next);
+}
 
 /*
  * Return per-task heap allocation totals and lists of blocks.
@@ -71,13 +201,29 @@ size_t heap_caps_get_per_task_info(heap_task_info_params_t *params)
         multi_heap_block_handle_t b = multi_heap_get_first_block(heap);
         multi_heap_internal_lock(heap);
         for ( ; b ; b = multi_heap_get_next_block(heap, b)) {
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+            bool is_allocated = true;
+#endif
             if (multi_heap_is_free(b)) {
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+                is_allocated = false;
+#else
                 continue;
+#endif
             }
             void *p = multi_heap_get_block_address(b);  // Safe, only arithmetic
-            size_t bsize = multi_heap_get_allocated_size(heap, p); // Validates
+            size_t bsize;
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+            if (!is_allocated) {
+                bsize = multi_heap_get_free_size(b);
+            } else
+#endif
+            bsize = multi_heap_get_allocated_size(heap, p); // Validates
             TaskHandle_t btask = (TaskHandle_t)multi_heap_get_block_owner(b);
 
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+            if (is_allocated) {
+#endif
             // Accumulate per-task allocation totals.
             if (params->totals) {
                 size_t i;
@@ -99,6 +245,9 @@ size_t heap_caps_get_per_task_info(heap_task_info_params_t *params)
                     }
                 }
             }
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+            }
+#endif
 
             // Return details about allocated blocks for selected tasks.
             if (blocks && remaining > 0) {
@@ -118,12 +267,88 @@ size_t heap_caps_get_per_task_info(heap_task_info_params_t *params)
                 blocks->size = bsize;
                 ++blocks;
                 --remaining;
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+                blocks->is_allocated = is_allocated;
+#endif
             }
         }
         multi_heap_internal_unlock(heap);
     }
     *params->num_totals = count;
     return params->max_blocks - remaining;
+}
+
+size_t heap_caps_get_next_task_stat(heap_task_stat_t *task, const bool start)
+{
+    static heap_task_stat_t *task_info;
+
+    if (!task_info && !start)
+        return 0;
+
+    if (start) {
+        task_info = SLIST_FIRST(&task_stats);
+        if (!task_info)
+            return 0;
+    } else {
+        task_info = SLIST_NEXT(task_info, next);
+        /* Exhausted the list */
+        if (!task_info) {
+            return 0;
+        }
+    }
+    
+    memcpy(task, task_info, sizeof(heap_task_stat_t));
+    return sizeof(heap_task_stat_t);
+}
+
+size_t heap_caps_get_next_block_info(heap_task_block_t *block, const bool start)
+{
+    static heap_t *reg;
+    static multi_heap_handle_t heap;
+    static multi_heap_block_handle_t b;
+
+    if (start) {
+        reg = SLIST_FIRST(&registered_heaps);
+        if (!reg)
+            return 0;
+        heap = reg->heap;
+        if (!heap || !(b = multi_heap_get_first_block(heap)))
+            return 0;
+    }
+
+    while(!b) {
+        reg = SLIST_NEXT(reg, next);
+        if (!reg) {
+            return 0;
+        }
+        heap = reg->heap;
+        if (!heap)
+            continue;
+        b = multi_heap_get_first_block(heap);
+    }
+
+    multi_heap_internal_lock(heap);
+    block->address = multi_heap_get_block_address(b);  // Safe, only arithmetic
+    if (multi_heap_is_free(b)) {
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+        block->is_allocated = false;
+#endif
+        block->size = multi_heap_get_free_size(b);
+        block->task = (TaskHandle_t)0;
+    } else {
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+        block->is_allocated = true;
+#endif
+        block->size = multi_heap_get_allocated_size(heap, block->address);
+        block->task = (TaskHandle_t)multi_heap_get_block_owner(b);
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+        strlcpy(block->taskname, heap_caps_get_task_name(block->task), CONFIG_HEAP_MAX_TASK_NAME_LEN);
+#endif
+    }
+
+    b = multi_heap_get_next_block(heap, b);
+    multi_heap_internal_unlock(heap);
+    return 1;
 }
 
 #endif // CONFIG_HEAP_TASK_TRACKING

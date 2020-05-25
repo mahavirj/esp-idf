@@ -15,6 +15,10 @@
 
 #ifdef CONFIG_HEAP_TASK_TRACKING
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "rom/queue.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,7 +39,26 @@ typedef struct {
     TaskHandle_t task;                ///< Task that allocated the block
     void *address;                    ///< User address of allocated block
     uint32_t size;                    ///< Size of the allocated block
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_FREE_BLOCKS
+    bool is_allocated;
+#endif
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+    char taskname[CONFIG_HEAP_MAX_TASK_NAME_LEN];
+#endif
 } heap_task_block_t;
+
+/* Maintains accumulated stat (across all heap caps) for a task */
+typedef struct heap_task_stat {
+    TaskHandle_t task;
+#ifdef CONFIG_HEAP_TASK_TRACKING_INCLUDE_TASKNAME
+    char taskname[CONFIG_HEAP_MAX_TASK_NAME_LEN];
+#endif
+    size_t current[NUM_HEAP_TASK_CAPS];
+    size_t peak[NUM_HEAP_TASK_CAPS];
+    size_t min_block;
+    size_t max_block;
+    SLIST_ENTRY(heap_task_stat) next;
+} heap_task_stat_t;
 
 /** @brief Structure to provide parameters to heap_caps_get_per_task_info
  *
@@ -90,6 +113,12 @@ typedef struct {
  * @return Number of block detail structs returned (@see heap_task_block_t).
  */
 extern size_t heap_caps_get_per_task_info(heap_task_info_params_t *params);
+
+void heap_caps_update_per_task_info_alloc(multi_heap_handle_t heap, size_t size, int caps);
+void heap_caps_update_per_task_info_free(multi_heap_handle_t heap, void *ptr, int caps);
+void heap_caps_update_per_task_info_realloc(multi_heap_handle_t heap, size_t old_size, TaskHandle_t old_task, size_t new_size, int caps);
+size_t heap_caps_get_next_block_info(heap_task_block_t *block, const bool start);
+size_t heap_caps_get_next_task_stat(heap_task_stat_t *task, const bool start);
 
 #ifdef __cplusplus
 }
