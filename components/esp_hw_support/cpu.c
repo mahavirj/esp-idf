@@ -175,7 +175,11 @@ static bool is_intr_num_resv(int intr_num)
 {
     // Workaround to reserve interrupt number 1 for Wi-Fi, 5,8 for Bluetooth, 6 for "permanently disabled interrupt"
     // [TODO: IDF-2465]
+#ifdef CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    uint32_t reserved = BIT(1) | BIT(2) | BIT(5) | BIT(6) | BIT(8);
+#else
     uint32_t reserved = BIT(1) | BIT(5) | BIT(6) | BIT(8);
+#endif
 
     // int_num 0,3,4,7 are unavailable for PULP cpu
 #if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2// TODO: IDF-5728 replace with a better macro name

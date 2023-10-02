@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -72,8 +72,10 @@ static bool is_ota_partition(const esp_partition_t *p)
 {
     return (p != NULL
             && p->type == ESP_PARTITION_TYPE_APP
-            && p->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_0
-            && p->subtype < ESP_PARTITION_SUBTYPE_APP_OTA_MAX);
+            && ((p->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_0
+            && p->subtype < ESP_PARTITION_SUBTYPE_APP_OTA_MAX)
+            || (p->subtype >= ESP_PARTITION_SUBTYPE_APP_USER_0
+            && p->subtype <= ESP_PARTITION_SUBTYPE_APP_USER_1)));
 }
 
 // Read otadata partition and fill array from two otadata structures.

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,6 +11,9 @@
 #if SOC_MEMPROT_SUPPORTED
 #include "soc/memprot_defs.h"
 #endif
+
+#include "soc/soc.h"
+#include "soc/memprot_defs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +68,19 @@ typedef enum {
 #define MEMP_HAL_CORE_X_IRAM0_DRAM0_DMA_SRAM_CATEGORY_BITS_ABOVE_SA  0x3 //0b11
 
 #endif
+
+//auxiliary macros & defines
+#define SOC_I_D_OFFSET (SOC_DIRAM_IRAM_LOW - SOC_DIRAM_DRAM_LOW)
+#define MAP_DRAM_TO_IRAM(addr) (addr + SOC_I_D_OFFSET)
+#define MAP_IRAM_TO_DRAM(addr) (addr - SOC_I_D_OFFSET)
+
+#define MEMP_LL_CHECK_IRAM_ADDR_IN_RANGE(x) if (x < SOC_DIRAM_IRAM_LOW || x >= SOC_DIRAM_IRAM_HIGH) { return 2; }
+#define MEMP_LL_CHECK_DRAM_ADDR_IN_RANGE(x) if (x < SOC_DIRAM_DRAM_LOW || x >= SOC_DIRAM_DRAM_HIGH) { return 2; }
+#define MEMP_LL_CHECK_SPLIT_ADDR_ALIGNED(x) if (x % I_D_SPLIT_LINE_ALIGN != 0) { return 3; }
+
+#define MEMP_LL_CORE_X_IRAM0_DRAM0_DMA_SRAM_CATEGORY_BITS_BELOW_SA  0x0 //0b00
+#define MEMP_LL_CORE_X_IRAM0_DRAM0_DMA_SRAM_CATEGORY_BITS_EQUAL_SA  0x2 //0b10
+#define MEMP_LL_CORE_X_IRAM0_DRAM0_DMA_SRAM_CATEGORY_BITS_ABOVE_SA  0x3 //0b11
 
 #ifdef __cplusplus
 }

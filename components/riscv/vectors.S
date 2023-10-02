@@ -10,9 +10,27 @@
 #include "soc/soc_caps.h"
 #include "sdkconfig.h"
 #include "esp_private/vectors_const.h"
+#include "soc/sensitive_reg.h"
+#include "soc/world_controller_reg.h"
+#include "soc/extmem_reg.h"
 
+#define W1_EXCEPTION_MAGIC  21
+#define EXCCAUSE_ECALL  11
 
-    .equ SAVE_REGS, 32
+/*
+ * uxTCBNumber and uxTaskNumber members are added in TCB structure when
+ * FreeRTOS Trace facility is enabled. WORLD offset is changed by 8 bytes
+ * because both members are 4 bytes in size.
+ */
+#ifdef CONFIG_FREERTOS_USE_TRACE_FACILITY
+#define WORLD_OFFSET    (0x4c + CONFIG_FREERTOS_MAX_TASK_NAME_LEN + 3 + 8)&~3
+#else
+#define WORLD_OFFSET    (0x4c + CONFIG_FREERTOS_MAX_TASK_NAME_LEN + 3)&~3
+#endif
+
+    /* Save CSRs when servicing interrupts */
+    .equ SAVE_REGS, 40
+
     .equ CONTEXT_SIZE, (SAVE_REGS * 4)
     .equ panic_from_exception, xt_unhandled_exception
     .equ panic_from_isr, panicHandler
@@ -59,6 +77,35 @@
     sw   t0, RV_STK_MEPC(sp)
 .endm
 
+.macro save_world
+    mv      t0, zero
+    csrr    t1, mcause
+    li      t2, 0x80000000
+    bleu    t1, t2, _from_exception
+
+    li      t2, 0x7fffffff
+    and     t0, t1, t2
+_from_exception:
+    /* t0 contains the mcause that is also the STATUSTABLE entry */
+    la      t1, WORLD_CONTROL_CORE_X_STATUSTABLE(0,0)
+    slli    t0, t0, 2
+    add     t2, t1, t0
+    lw      t3, 0x0(t2)
+    /* Zero out the STATUSTABLE contents and store the WORLD */
+    sw      zero, 0x0(t2)
+    andi    t3, t3, 1
+
+    la      t4, pxCurrentTCB
+    lw      t5, 0x00(t4)
+    sw      t3, WORLD_OFFSET(t5)
+
+    /* Set WORLD controller MIE to track changes in STATUSTABLE */
+    la      t0, WORLD_CONTROL_CORE_X_MSTATUS_MIE(0)
+    li      t1, 1
+    sw      t1, 0x0(t0)
+    fence
+.endm
+
 /* Restore the general purpose registers (excluding gp) from the context on
  * the stack. The context is then deallocated. The default size is CONTEXT_SIZE
  * but it can be overridden. */
@@ -100,6 +147,29 @@
     csrw    mepc, t0
 .endm
 
+.macro restore_world
+    la      t0, pxCurrentTCB
+    lw      t0, 0x00(t0)
+    lw      t0, WORLD_OFFSET(t0)
+    beq     t0, zero, skip_restore_world
+
+    /* Prepare WORLD controller for switch */
+    li      t1, 2
+    la      t2, WORLD_CONTROL_CORE_X_WORLD_PREPARE(0)
+    sw      t1, 0x0(t2)
+
+    /* Set TRIGGER_ADDR to the return address; held by MEPC */
+    lw      t1, RV_STK_MEPC(sp)
+    la      t2, WORLD_CONTROL_CORE_X_WORLD_TRIGGER_ADDR(0)
+    sw      t1, 0x0(t2)
+
+    li      t1, 1
+    la      t2, WORLD_CONTROL_CORE_X_WORLD_UPDATE(0)
+    sw      t1, 0x0(t2)
+skip_restore_world:
+    fence
+.endm
+
     .global rtos_int_enter
     .global rtos_int_exit
     .global _global_interrupt_handler
@@ -113,6 +183,35 @@
     .type _panic_handler, @function
     .global _panic_handler
 _panic_handler:
+
+#if CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    csrw    mscratch, t0
+
+    /* If exception caused by ecall, skip other W1 checks */
+    csrr    t0, mcause
+    xori    t0, t0, EXCCAUSE_ECALL
+    beq     t0, zero, w0_exception
+
+    /* Check if the exception occurred in W1 environment,
+     * if so, delegate to _interrupt_handler
+     */
+    la      t0, WORLD_CONTROL_CORE_X_STATUSTABLE(0,0)
+    lw      t0, 0x0(t0)
+    andi    t0, t0, 1
+    beq     t0, zero, w0_exception
+    csrr    t0, mscratch
+
+    /* Use mscratch temporarily to notify _interrupt_handler about the W1 exception
+     * Storing a number (21, 0b10101) in mscratch
+     */
+    csrrwi  zero, mscratch, W1_EXCEPTION_MAGIC
+
+    j       _interrupt_handler
+
+w0_exception:
+    csrr    t0, mscratch
+#endif
+
     /* Allocate space on the stack and store general purpose registers */
     save_general_regs RV_STK_FRMSZ
 
@@ -124,6 +223,22 @@ _panic_handler:
 
     /* Save CSRs */
     sw    t0, RV_STK_SP(sp)
+
+#if CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    /* If exception caused by ECALL, delegate to __ecall_handler and store
+     * privileged registers in kernel stack
+     */
+    csrr    t2, mcause
+    li      t3, EXCCAUSE_ECALL
+    bne     t2, t3, _skip_ecall
+
+    .global __ecall_handler
+
+    // Need to be defined by the application
+    call    __ecall_handler             // Should not return
+
+_skip_ecall:
+#endif
     csrr  t0, mepc
     sw    t0, RV_STK_MEPC(sp)
     csrr  t0, mstatus
@@ -207,7 +322,43 @@ _interrupt_handler:
      * the interrupt happened. */
     save_general_regs
     save_mepc
+#if CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    save_world
 
+    /* Save CSRs */
+    sw    gp, RV_STK_GP(sp)
+
+    addi  t0, sp, CONTEXT_SIZE /* restore sp with the value when trap happened */
+
+    sw    t0, RV_STK_SP(sp)
+    csrr  t0, mstatus
+    sw    t0, RV_STK_MSTATUS(sp)
+    csrr  t0, mtvec
+    sw    t0, RV_STK_MTVEC(sp)
+    csrr  t0, mcause
+    sw    t0, RV_STK_MCAUSE(sp)
+    csrr  t0, mtval
+    sw    t0, RV_STK_MTVAL(sp)
+    csrr  t0, mhartid
+    sw    t0, RV_STK_MHARTID(sp)
+
+    /* Check if we arrive here because of exception in user space */
+    csrr    t0, mscratch
+    li      t1, W1_EXCEPTION_MAGIC
+    bne     t0, t1, 1f
+
+    /* It is indeed from W1 exception.
+     * Set the mcause to 2 (interrupt reserved for W1 exception)
+     * The actual mcause is already stored on the stack
+     */
+    csrrwi  zero, mcause, 2
+
+    /* Clear mscratch CSR */
+    csrw   mscratch, zero
+
+    fence
+1:
+#else
     /* Though it is not necessary we save GP and SP here.
      * SP is necessary to help GDB to properly unwind
      * the backtrace of threads preempted by interrupts (OS tick etc.).
@@ -218,6 +369,7 @@ _interrupt_handler:
     addi  t0, sp, CONTEXT_SIZE /* restore sp with the value when interrupt happened */
     /* Save SP */
     sw    t0, RV_STK_SP(sp)
+#endif
 
     /* Notify the RTOS that an interrupt ocurred, it will save the current stack pointer
      * in the running TCB, no need to pass it as a parameter */
@@ -295,6 +447,9 @@ _interrupt_handler:
      * from `mcause` to `mintstatus` CSR */
     csrw    mcause, s1
     csrw    mstatus, s2
+#if CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    restore_world
+#endif
     restore_mepc
     restore_general_regs
 

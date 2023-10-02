@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -84,6 +84,12 @@ typedef enum {
     ESP_PARTITION_SUBTYPE_APP_OTA_14 = ESP_PARTITION_SUBTYPE_APP_OTA_MIN + 14,//!< OTA partition 14
     ESP_PARTITION_SUBTYPE_APP_OTA_15 = ESP_PARTITION_SUBTYPE_APP_OTA_MIN + 15,//!< OTA partition 15
     ESP_PARTITION_SUBTYPE_APP_OTA_MAX = ESP_PARTITION_SUBTYPE_APP_OTA_MIN + 16,//!< Max subtype of OTA partition
+
+    ESP_PARTITION_SUBTYPE_APP_USER_MIN = 0x40,
+    ESP_PARTITION_SUBTYPE_APP_USER_0 = ESP_PARTITION_SUBTYPE_APP_USER_MIN + 0,
+    ESP_PARTITION_SUBTYPE_APP_USER_1 = ESP_PARTITION_SUBTYPE_APP_USER_MIN + 1,
+    ESP_PARTITION_SUBTYPE_DATA_USER_OTA = 0x50,
+
     ESP_PARTITION_SUBTYPE_APP_TEST = 0x20,                                    //!< Test application partition
 
     ESP_PARTITION_SUBTYPE_DATA_OTA = 0x00,                                    //!< OTA selection partition

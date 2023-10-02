@@ -56,7 +56,8 @@ UartDwnLdProc = 0x400000b4;
 Uart_Init = 0x400000b8;
 ets_set_user_start = 0x400000bc;
 /* Data (.data, .bss, .rodata) */
-ets_rom_layout_p = 0x3ff1fffc;
+/* ets_rom_layout_p = 0x3ff1fffc; */
+PROVIDE( ets_rom_layout_p = 0x3ff1fffc );
 ets_ops_table_ptr = 0x3fcdfffc;
 
 

@@ -4,6 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "sdkconfig.h"
+
+/* DRAM region from 0x3FCDF060 is reserved for ROM functions
+ * and user app should not be able to access it. A split line
+ * is added to protect reserved ROM region. As the split line
+ * can only be added at 256 byte aligned address, alignment
+ * correction is used here.
+ */
+#define ROM_DRAM_RESERVE_START          ((0x3FCDF060) & ~((256) - 1))
+
 /* Default entry point */
 ENTRY(call_start_cpu0);
 
@@ -143,6 +153,13 @@ SECTIONS
   .iram0.text :
   {
     _iram_start = ABSOLUTE(.);
+#ifdef CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+    _reserve_w1_iram_start = ABSOLUTE(.);
+    . += CONFIG_PA_ALLOCATE_USER_IRAM_SIZE;
+    . += 16;
+    . = ALIGN (0x200);
+    _reserve_w1_iram_end = ABSOLUTE(.);
+#endif
     /* Vectors go to start of IRAM */
     ASSERT(ABSOLUTE(.) % 0x100 == 0, "vector address must be 256 byte aligned");
     KEEP(*(.exception_vectors_table.text));
@@ -223,6 +240,27 @@ SECTIONS
     . = ALIGN (8);
     _bss_end = ABSOLUTE(.);
   } > dram0_0_seg
+
+#ifdef CONFIG_ESP_PRIVILEGE_SEPARATION_ENABLE
+  .reserve_w1_dram (NOLOAD) :
+  {
+     /* Assign W1 DRAM start address as per the size configured in Kconfig.
+      * 0x3FCDF060 - 0x3FCE0000 space is reserved for ROM code so to avoid
+      * overlapping for reserved memory regions, treat 0x3FCDF060 as the end of DRAM region
+      */
+#if CONFIG_PA_MEMORY_ALLOCATE_PROTECTED
+     _reserve_w1_dram_start = ABSOLUTE(_data_start + CONFIG_PA_ALLOCATE_DRAM_SIZE);
+#elif CONFIG_PA_MEMORY_ALLOCATE_USER
+     _reserve_w1_dram_start = ABSOLUTE(ROM_DRAM_RESERVE_START - CONFIG_PA_ALLOCATE_DRAM_SIZE);
+#endif
+     /* Align the starting boundary to 512 bytes as it is a requirement for the PMS split line */
+     _reserve_w1_dram_start = ABSOLUTE((_reserve_w1_dram_start + 0x200 - 1) & ~(0x200 - 1));
+     _reserve_w1_dram_end = ABSOLUTE(ROM_DRAM_RESERVE_START);
+  } > dram0_0_seg
+
+  ASSERT((_heap_start <= _reserve_w1_dram_start),
+          "Protected DRAM segment contents does not fit.")
+#endif
 
   ASSERT(((_bss_end - ORIGIN(dram0_0_seg)) <= LENGTH(dram0_0_seg)), "DRAM segment data does not fit.")
 

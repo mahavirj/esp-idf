@@ -26,3 +26,5 @@ idf_component_register(SRCS "${srcs}"
                        LDFRAGMENTS linker.lf
                        INCLUDE_DIRS "include"
                        PRIV_REQUIRES ${priv_requires})
+
+idf_component_optional_requires(PRIVATE esp_syscall)

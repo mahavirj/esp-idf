@@ -7,7 +7,7 @@
 # See https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/partition-tables.html
 # for explanation of partition table structure and uses.
 #
-# SPDX-FileCopyrightText: 2016-2021 Espressif Systems (Shanghai) CO LTD
+# SPDX-FileCopyrightText: 2016-2023 Espressif Systems (Shanghai) CO LTD
 # SPDX-License-Identifier: Apache-2.0
 
 from __future__ import division, print_function, unicode_literals
@@ -27,6 +27,8 @@ PARTITION_TABLE_SIZE  = 0x1000  # Size of partition table
 
 MIN_PARTITION_SUBTYPE_APP_OTA = 0x10
 NUM_PARTITION_SUBTYPE_APP_OTA = 16
+MIN_PARTITION_SUBTYPE_USER_APP_OTA = 0x40
+NUM_PARTITION_SUBTYPE_USER_APP_OTA = 2
 
 SECURE_NONE = None
 SECURE_V1 = 'v1'
@@ -68,6 +70,7 @@ SUBTYPES = {
         'nvs_keys': 0x04,
         'efuse': 0x05,
         'undefined': 0x06,
+        'user_ota': 0x50,
         'esphttpd': 0x80,
         'fat': 0x81,
         'spiffs': 0x82,
@@ -347,6 +350,10 @@ class PartitionDefinition(object):
     # add subtypes for the 16 OTA slot values ("ota_XX, etc.")
     for ota_slot in range(NUM_PARTITION_SUBTYPE_APP_OTA):
         SUBTYPES[TYPES['app']]['ota_%d' % ota_slot] = MIN_PARTITION_SUBTYPE_APP_OTA + ota_slot
+
+    # add subtypes for the 2 User OTA slot values ("ota_XX, etc.")
+    for ota_slot in range(NUM_PARTITION_SUBTYPE_USER_APP_OTA):
+        SUBTYPES[TYPES['app']]['user_%d' % ota_slot] = MIN_PARTITION_SUBTYPE_USER_APP_OTA + ota_slot
 
     def __init__(self):
         self.name = ''
