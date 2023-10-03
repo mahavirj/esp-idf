@@ -573,7 +573,7 @@ menu "ESP System Settings"
 
     config ESP_SYSTEM_HW_STACK_GUARD
         bool "Hardware stack guard"
-        depends on SOC_ASSIST_DEBUG_SUPPORTED
+        depends on SOC_ASSIST_DEBUG_SUPPORTED && !ESP_PRIVILEGE_SEPARATION_ENABLE
         default y
         help
             This config allows to trigger a panic interrupt when Stack Pointer register goes out of allocated stack
