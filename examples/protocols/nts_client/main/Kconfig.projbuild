@@ -1,0 +1,20 @@
+menu "Example Configuration"
+
+    config EXAMPLE_NTS_KE_HOST
+        string "NTS-KE server host name"
+        default "nts.meta.com"
+        help
+            Host name of the NTS key establishment server (RFC 8915).
+            Its certificate must chain to a root in the ESP x509 certificate bundle.
+
+    config EXAMPLE_NTS_KE_PORT
+        int "NTS-KE server TCP port"
+        range 1 65535
+        default 4460
+
+    config EXAMPLE_NTS_POLL_INTERVAL_S
+        int "Interval between time queries (seconds)"
+        range 1 86400
+        default 64
+
+endmenu
