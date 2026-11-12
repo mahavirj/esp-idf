@@ -1,14 +1,16 @@
 menu "Example Configuration"
 
-    config EXAMPLE_NTS_KE_HOST
-        string "NTS-KE server host name"
-        default "nts.meta.com"
+    config EXAMPLE_NTS_KE_HOSTS
+        string "NTS-KE server host names"
+        default "nts.meta.com ptbtime1.ptb.de"
         help
-            Host name of the NTS key establishment server (RFC 8915).
-            Its certificate must chain to a root in the ESP x509 certificate bundle.
+            Host names of NTS key establishment servers (RFC 8915), separated by spaces.
+            The example starts with the first one and moves to the next when a server
+            stops working. Up to 8 names are used.
+            Each certificate must chain to a root in the ESP x509 certificate bundle.
 
     config EXAMPLE_NTS_KE_PORT
-        int "NTS-KE server TCP port"
+        int "NTS-KE server TCP port (same for all servers)"
         range 1 65535
         default 4460
 

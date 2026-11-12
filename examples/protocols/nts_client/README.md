@@ -7,13 +7,20 @@
 
 This example sets the system time from an authenticated source using Network Time Security ([RFC 8915](https://www.rfc-editor.org/rfc/rfc8915)). Plain SNTP responses are not authenticated, so anyone on the network path can forge them. With NTS every response carries an AEAD tag that only the server can produce.
 
-The default server is `nts.meta.com`. Any RFC 8915 server whose certificate chains to a root in the ESP x509 certificate bundle can be used.
+The example is configured with a list of public NTS servers and starts with the first one:
+
+| Server | Operator | AEAD negotiated |
+| ------ | -------- | --------------- |
+| `nts.meta.com` | Meta | AES-128-GCM-SIV |
+| `ptbtime1.ptb.de` | PTB, Germany | AES-SIV-CMAC-256 |
+
+Any RFC 8915 server whose certificate chains to a root in the ESP x509 certificate bundle can be added to the list.
 
 ## How it works
 
 1. **Key establishment (NTS-KE).** The client opens a TLS 1.3 connection to the NTS-KE server on TCP port 4460 with ALPN `ntske/1`, and negotiates NTPv4 and an AEAD algorithm. The server returns eight opaque cookies and, optionally, the NTP server to use. Both sides derive the client-to-server and server-to-client keys from the TLS exporter, so no key ever crosses the wire.
 2. **Authenticated NTP.** Each NTPv4 request over UDP carries a unique identifier, one cookie and an authenticator. The server recovers the keys from the cookie, authenticates its response and encrypts a replacement cookie into it. A cookie is never used twice.
-3. **Recovery.** A lost response costs a cookie, so the next request asks for extra ones. After three consecutive failures, or when the cookies run out, the client runs the key establishment again, waiting 10 seconds and then twice as long each time (up to one hour) until a query succeeds. Some servers, including the default one, do not send an NTS NAK, so silence is treated as "start over". An authenticated kiss-o'-death is handled without a new key establishment: `RATE` doubles the polling interval, `DENY` and `RSTR` stop the client.
+3. **Recovery.** A lost response costs a cookie, so the next request asks for extra ones. After three consecutive failures, or when the cookies run out, the client runs the key establishment again, waiting 10 seconds and then twice as long each time (up to one hour) until a query succeeds. The first retry goes to the same server; later ones move to the next server in the list. Some servers, including the default one, do not send an NTS NAK, so silence is treated as "start over". An authenticated kiss-o'-death is handled without a new key establishment: `RATE` doubles the polling interval, `DENY` and `RSTR` stop the client.
 
 | File | Content |
 | ---- | ------- |
@@ -29,7 +36,7 @@ Both AEAD algorithms are built on the PSA Crypto API, as Mbed TLS does not provi
 Open the project configuration menu (`idf.py menuconfig`):
 
 * Configure Wi-Fi or Ethernet under "Example Connection Configuration".
-* Under "Example Configuration", set the NTS-KE server host name and port, and the polling interval.
+* Under "Example Configuration", set the list of NTS-KE server host names, the port, and the polling interval.
 
 The example enables `CONFIG_MBEDTLS_SSL_PROTO_TLS1_3` and `CONFIG_MBEDTLS_SSL_KEYING_MATERIAL_EXPORT` in `sdkconfig.defaults`. NTS does not work without them.
 
@@ -58,3 +65,4 @@ I (69507) nts_example: Authenticated time: 2026-11-12 07:00:31 UTC
 * **First boot.** The clock is not set when the TLS handshake runs, so the certificate validity period cannot be checked on the first key establishment. This is the default behaviour of ESP-IDF (`CONFIG_MBEDTLS_HAVE_TIME_DATE` is disabled). A product should at least reject times earlier than its build date.
 * **Clock discipline.** The example steps the clock by the measured offset on every poll. It does not filter samples or slew the clock.
 * **IPv4 first.** The NTP server is resolved over IPv4 first and over IPv6 only if that fails.
+* **Key establishment deadline.** Some public servers close the key establishment connection if it is not finished within about two seconds. On a slow network link the TLS handshake can take longer than that, and the example then moves on to the next server.

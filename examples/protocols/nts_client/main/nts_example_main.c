@@ -28,8 +28,22 @@ static const char *TAG = "nts_example";
 #define REKEY_WAIT_MIN_S    10      /* back-off between key exchanges: first step ... */
 #define REKEY_WAIT_MAX_S    3600    /* ... and cap */
 #define POLL_MAX_S          1024    /* cap for the polling interval after "RATE" kiss codes */
+#define MAX_HOSTS           8
 
 static nts_session_t s_session;
+
+/* The configured server list, split in place into host names */
+static char s_hosts_buf[] = CONFIG_EXAMPLE_NTS_KE_HOSTS;
+static const char *s_hosts[MAX_HOSTS];
+static int s_host_count;
+
+static void parse_hosts(void)
+{
+    char *save = NULL;
+    for (char *h = strtok_r(s_hosts_buf, " ,", &save); h && s_host_count < MAX_HOSTS; h = strtok_r(NULL, " ,", &save)) {
+        s_hosts[s_host_count++] = h;
+    }
+}
 
 static void apply_offset(int64_t offset_us)
 {
@@ -62,27 +76,37 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "AES-SIV and AES-GCM-SIV self tests passed");
 
+    parse_hosts();
+    if (s_host_count == 0) {
+        ESP_LOGE(TAG, "no NTS-KE server configured");
+        return;
+    }
+
     ESP_ERROR_CHECK(example_connect());
 
     bool have_keys = false;
     int failures = 0;
     int rekey_wait_s = 0;
+    int host = 0;
     int poll_s = CONFIG_EXAMPLE_NTS_POLL_INTERVAL_S;
 
     while (1) {
         if (!have_keys) {
             /*
              * Back off exponentially between key exchanges (RFC 8915 section 4.2). The first
-             * one after a good query is immediate; the wait is reset by the next good query.
+             * one after a good query is immediate and goes to the same server; after that,
+             * each attempt waits longer and moves to the next server in the list. The wait
+             * is reset by the next good query.
              */
             if (rekey_wait_s) {
+                host = (host + 1) % s_host_count;
                 ESP_LOGW(TAG, "next NTS-KE in %d seconds", rekey_wait_s);
                 vTaskDelay(pdMS_TO_TICKS(rekey_wait_s * 1000));
             }
             rekey_wait_s = rekey_wait_s ? MIN(rekey_wait_s * 2, REKEY_WAIT_MAX_S) : REKEY_WAIT_MIN_S;
 
-            ESP_LOGI(TAG, "NTS-KE with %s:%d", CONFIG_EXAMPLE_NTS_KE_HOST, CONFIG_EXAMPLE_NTS_KE_PORT);
-            if (nts_ke_handshake(CONFIG_EXAMPLE_NTS_KE_HOST, CONFIG_EXAMPLE_NTS_KE_PORT, &s_session) != ESP_OK) {
+            ESP_LOGI(TAG, "NTS-KE with %s:%d", s_hosts[host], CONFIG_EXAMPLE_NTS_KE_PORT);
+            if (nts_ke_handshake(s_hosts[host], CONFIG_EXAMPLE_NTS_KE_PORT, &s_session) != ESP_OK) {
                 ESP_LOGE(TAG, "NTS-KE failed");
                 continue;
             }
